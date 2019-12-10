@@ -1,6 +1,4 @@
-#!/usr/bin/env python2
 # -*- coding: utf-8 -*-
-
 import os
 import subprocess
 import numpy
@@ -10,6 +8,11 @@ from distutils.extension import Extension
 from Cython.Build import cythonize
 from Cython.Distutils import build_ext
 
+def locate_conda_environment_lib():
+    if not 'CONDA_PREFIX' in os.environ:
+        raise Exception("Set CONDA_PREFIX (use conda activate), so that the library can be linked with rpath.")
+
+    return os.environ['CONDA_PREFIX'] + "/lib64"
 
 def locate_cuda():
     # first check if the CUDAHOME env variable is in use
@@ -79,27 +82,33 @@ class custom_build_ext(build_ext):
         customize_compiler_for_nvcc(self.compiler)
         build_ext.build_extensions(self)
 
-
 opencv_libs_str = subprocess.check_output('pkg-config --libs opencv'.split()).decode()
 opencv_incs_str = subprocess.check_output('pkg-config --cflags opencv'.split()).decode()
 
 opencv_libs = [str(lib) for lib in opencv_libs_str.strip().split()]
 opencv_incs = [str(inc) for inc in opencv_incs_str.strip().split()]
+opencv_incs = [s[2:] for s in opencv_incs]  # strip the -I
 
-eppm_src = ['EPPM/bao_pmflow_census_kernel.cu', 'EPPM/bao_pmflow_refine_kernel.cu',
-            'EPPM/bao_flow_patchmatch_multiscale_cuda.cpp',
-            'EPPM/bao_flow_patchmatch_multiscale_kernel.cu', 'EPPM/bao_pmflow_kernel.cu',
-            'EPPM/basic/bao_basic_cuda.cpp']
+conda_environ_lib = locate_conda_environment_lib()
 
 extensions = [
     Extension('optflow',
-              sources=['optflow.pyx'] + eppm_src,
-              include_dirs=[numpy.get_include(), cuda['home'] + '/include', 'EPPM', 'EPPM/basic'] + opencv_incs,
+              sources=['optflow.pyx'],
+              include_dirs=[numpy.get_include(), cuda['home'] + '/include'] + opencv_incs,
               language='c++',
-              extra_link_args=opencv_libs + ['-lcudart', '-L' + cuda['home'] + '/lib', '-L' + cuda['home'] + '/lib64',
-                                             '-L' + cuda['home'] + '/lib/x86_64-linux-gnu', '-g'],
+              extra_link_args=opencv_libs + ['-Wl,-rpath,' + conda_environ_lib,
+                                             '-lcudart',
+                                             '-L' + cuda['home'] + '/lib',
+                                             '-L' + cuda['home'] + '/lib64',
+                                             '-L' + cuda['home'] + '/lib/x86_64-linux-gnu',
+                                             '-g'],
               extra_compile_args={'gcc': ['-g'],
-                                  'nvcc': ['-arch=sm_30', '--ptxas-options=-v', '-c', '--compiler-options', "'-fPIC'"]},
+                                  'nvcc': [
+                                      '-arch=sm_30',
+                                      '--ptxas-options=-v',
+                                      '-c',
+                                      '--compiler-options',
+                                      "'-fPIC'"]}
               )
 ]
 
